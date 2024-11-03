@@ -5,19 +5,75 @@ import { ObjectId } from 'mongodb';
 const router = express.Router()
 // base path: /grades
 
+
+
+// GET route at /stats
+router.get('/stats', async (req, res) => {
+  try {
+    const result = await db.collection('grades')
+      .aggregate([
+        { $unwind: '$scores' },
+        {
+          $group: {
+            _id: '$learner_id',
+            exam: { $avg: { $cond: [{ $eq: ['$scores.type', 'exam'] }, '$scores.score', null] } },
+            quiz: { $avg: { $cond: [{ $eq: ['$scores.type', 'quiz'] }, '$scores.score', null] } },
+            homework: { $avg: { $cond: [{ $eq: ['$scores.type', 'homework'] }, '$scores.score', null] } },
+          },
+        },
+        {
+          $project: {
+            avg: {
+              $sum: [
+                { $multiply: ['$exam', 0.5] },
+                { $multiply: ['$quiz', 0.3] },
+                { $multiply: ['$homework', 0.2] }
+              ]
+            }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalLearners: { $sum: 1 },
+            above70: { $sum: { $cond: [{ $gt: ['$avg', 70] }, 1, 0] } },
+          },
+        },
+        {
+          $project: {
+            totalLearners: 1,
+            above70: 1,
+            percentageAbove70: { $multiply: [{ $divide: ['$above70', '$totalLearners'] }, 100] },
+          },
+        },
+      ])
+      .toArray();
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error in /grades/stats route:', error);
+    res.status(500).json({ error: `Error fetching stats: ${error.message}` });
+  }
+});
+
+
+
 // Get a single grade entry
 router.get('/:id', async (req, res, next) => {
   try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).send('Invalid ID format');
+    }
     let collection = db.collection("grades");
-    const query = { _id: new ObjectId(req.params.id) }
+    let query = { _id: new ObjectId(req.params.id) };
     let result = await collection.findOne(query);
 
-    if (!result) res.send("Not Found").status(404)
-    else res.send(result).status(200)
+    if (!result) res.status(404).send("Not Found");
+    else res.status(200).send(result);
   } catch (err) {
-    next(err) // the next function directs the err to the global error handling middleware
+    next(err);
   }
-})
+});
 
 
 // Backwards compatibility or students/learners
@@ -211,21 +267,24 @@ router.patch("/class/:id", async (req, res, next) => {
   }
 })
 
-
-
-
-router.delete("/:id", async (req, res, next) => {
+// Delete a single grade entry
+router.delete('/:id', async (req, res, next) => {
   try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).send('Invalid ID format');
+    }
     let collection = db.collection("grades");
-    let query = { _id: ObjectId.createFromHexString(req.params.id) }
-    let result = await collection.deleteOne(query)
+    let query = { _id: new ObjectId(req.params.id) };
+    let result = await collection.deleteOne(query);
 
-    if (!result) res.send("Not Found").status(404)
-    else res.send(result).status(200)
+    if (!result) res.status(404).send("Not Found");
+    else res.status(200).send(result);
   } catch (err) {
-    next(err)
+    next(err);
   }
-})
+});
+
+
 // Delete a learner's grade entries
 router.delete("/learner/:id", async (req, res, next) => {
   try {
@@ -255,7 +314,5 @@ router.delete("/class/:id", async (req, res, next) => {
     next(err)
   }
 })
-
-
 
 export default router

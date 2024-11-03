@@ -3,6 +3,57 @@ import db from "../db/conn.js";
 
 const router = express.Router();
 
+router.get('/stats/:id', async (req, res) => {
+  const classId = parseInt(req.params.id, 10); // Parse the class_id from the request parameters
+
+  try {
+    const result = await db.collection('grades')
+      .aggregate([
+        { $match: { class_id: classId } }, // Filter by class_id
+        { $unwind: '$scores' },
+        {
+          $group: {
+            _id: '$learner_id',
+            exam: { $avg: { $cond: [{ $eq: ['$scores.type', 'exam'] }, '$scores.score', null] } },
+            quiz: { $avg: { $cond: [{ $eq: ['$scores.type', 'quiz'] }, '$scores.score', null] } },
+            homework: { $avg: { $cond: [{ $eq: ['$scores.type', 'homework'] }, '$scores.score', null] } },
+          },
+        },
+        {
+          $project: {
+            avg: {
+              $sum: [
+                { $multiply: ['$exam', 0.5] },
+                { $multiply: ['$quiz', 0.3] },
+                { $multiply: ['$homework', 0.2] }
+              ]
+            }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalLearners: { $sum: 1 },
+            above70: { $sum: { $cond: [{ $gt: ['$avg', 70] }, 1, 0] } },
+          },
+        },
+        {
+          $project: {
+            totalLearners: 1,
+            above70: 1,
+            percentageAbove70: { $multiply: [{ $divide: ['$above70', '$totalLearners'] }, 100] },
+          },
+        },
+      ])
+      .toArray();
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error in /grades/stats/:id route:', error);
+    res.status(500).json({ error: `Error fetching stats for class ${classId}: ${error.message}` });
+  }
+});
+
 /**
  * It is not best practice to seperate these routes
  * like we have done here. This file was created
